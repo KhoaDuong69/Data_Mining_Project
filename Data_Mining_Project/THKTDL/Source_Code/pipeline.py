@@ -1,31 +1,65 @@
+import importlib.util
 import io
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
 
 REPO_ZIP = "https://github.com/KhoaDuong69/Data_Mining_Project/archive/refs/heads/main.zip"
 BASE_DIR = Path(__file__).resolve().parent
-CACHE_DIR = BASE_DIR / "_repo_cache"
+CACHE_DIR = Path(tempfile.gettempdir()) / "data_mining_project_cache"  # nằm ngoài repo
 
 ENV = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONWARNINGS": "ignore"}
 
+# tên module để import -> tên gói để pip cài
+REQUIRED = {
+    "pandas": "pandas",
+    "matplotlib": "matplotlib",
+    "mlxtend": "mlxtend",
+    "plotly": "plotly",
+    "streamlit": "streamlit",
+    "nbconvert": "nbconvert",
+    "ipykernel": "ipykernel",
+}
 
-def in_cache(path, root):
-    """True nếu path nằm trong _repo_cache (chỉ xét phần bên dưới root)."""
-    try:
-        return "_repo_cache" in path.relative_to(root).parts
-    except ValueError:
-        return False
+
+def ensure_packages():
+    """Tự cài các thư viện còn thiếu vào đúng Python đang chạy pipeline."""
+    missing = [pkg for mod, pkg in REQUIRED.items()
+               if importlib.util.find_spec(mod) is None]
+    if missing:
+        print("Đang cài thư viện còn thiếu:", ", ".join(missing), flush=True)
+        subprocess.run([sys.executable, "-m", "pip", "install", *missing], check=True)
+
+
+def locate_root(search_dir):
+    """Tìm thư mục cha của Source_Code bên trong search_dir (dùng cho bản tải về)."""
+    for src in search_dir.rglob("Source_Code"):
+        if src.is_dir():
+            return src.parent
+    print(f"Không thấy thư mục Source_Code trong {search_dir}")
+    sys.exit(1)
+
+
+def locate_local_root():
+    """Chế độ --local: đi ngược lên từ vị trí pipeline.py để tìm thư mục chứa Source_Code."""
+    for cand in (BASE_DIR, *BASE_DIR.parents):
+        if cand.name == "Source_Code":
+            return cand.parent
+        if (cand / "Source_Code").is_dir():
+            return cand
+    print("Không thấy thư mục Source_Code ở chế độ --local.")
+    sys.exit(1)
 
 
 def download_repo():
-    """Xóa cache cũ, tải repo từ GitHub và trả về thư mục chứa Source_Code."""
+    """Xóa cache cũ, tải repo từ GitHub, trả về thư mục chứa Source_Code."""
     if CACHE_DIR.exists():
-        shutil.rmtree(CACHE_DIR)
+        shutil.rmtree(CACHE_DIR, ignore_errors=True)
     print("Đang tải mã nguồn từ GitHub...", flush=True)
     try:
         with urllib.request.urlopen(REPO_ZIP, timeout=60) as resp:
@@ -38,22 +72,14 @@ def download_repo():
     return locate_root(CACHE_DIR)
 
 
-def locate_root(search_dir):
-    """Tìm thư mục cha của Source_Code bên trong search_dir."""
-    for src in search_dir.rglob("Source_Code"):
-        if src.is_dir() and not in_cache(src, search_dir):
-            return src.parent
-    print(f"Không thấy thư mục Source_Code trong {search_dir}")
-    sys.exit(1)
-
-
 def find_files(root):
     """Trả về (preprocess, notebook, app, danh_sách_thiếu)."""
     src = root / "Source_Code"
     preprocess = src / "TienXuLyDL.py"
     preprocess = preprocess if preprocess.exists() else None
-    notebook = next(src.glob("Khai_th*.ipynb"), None)  # chịu được dấu cách thừa
-    app = next((p for p in root.rglob("app.py") if not in_cache(p, root)), None)
+    notebook = next(src.glob("Khai_th*.ipynb"), None)  # chịu được dấu cách thừa trong tên
+    app = src / "app.py"
+    app = app if app.exists() else next(root.rglob("app.py"), None)
 
     missing = [name for name, p in (
         ("Source_Code/TienXuLyDL.py", preprocess),
@@ -81,8 +107,10 @@ def main():
     local = "--local" in sys.argv
     update = "--update" in sys.argv
 
+    ensure_packages()
+
     if local:
-        root = locate_root(BASE_DIR)
+        root = locate_local_root()
         preprocess, notebook, app, missing = find_files(root)
     else:
         if update or not CACHE_DIR.exists():
