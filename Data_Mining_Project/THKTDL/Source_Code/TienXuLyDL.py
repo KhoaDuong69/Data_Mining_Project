@@ -4,7 +4,9 @@ import numpy as np
 # =========================
 # 1. Đọc dữ liệu
 # =========================
-df = pd.read_csv("food_coded.csv")
+url = "https://raw.githubusercontent.com/KhoaDuong69/Data_Mining_Project/main/Data_Mining_Project/THKTDL/Data/food_coded.csv"
+
+df = pd.read_csv(url)
 
 print("Shape ban đầu:", df.shape)
 
